@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Demo House — Access Required</title>
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.169.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.169.0/examples/jsm/",
+        "@dgreenheck/ez-tree": "https://cdn.jsdelivr.net/npm/@dgreenheck/ez-tree@1.1.0/build/ez-tree.es.js"
+      }
+    }
+  </script>
+  <style id="gate-style">
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: radial-gradient(circle at 25% 20%, #17253b 0%, #0b111b 65%, #070b12 100%);
+      color: #f1f5f9;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }
+    .gate-wrap {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .gate-card {
+      width: 100%;
+      max-width: 400px;
+      background: rgba(15, 23, 42, 0.9);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      border-radius: 18px;
+      padding: 30px 32px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+      text-align: center;
+    }
+    .gate-kicker {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: #60a5fa;
+      margin-bottom: 8px;
+    }
+    .gate-card h1 {
+      font-size: 22px;
+      font-weight: 700;
+      color: #f8fafc;
+      margin-bottom: 8px;
+    }
+    .gate-sub {
+      font-size: 13px;
+      line-height: 1.5;
+      color: #cbd5e1;
+      margin-bottom: 20px;
+    }
+    .gate-form {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .gate-input {
+      width: 100%;
+      padding: 11px 14px;
+      border-radius: 9px;
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      background: rgba(8, 13, 24, 0.85);
+      color: #f8fafc;
+      font-size: 14px;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+    .gate-input:focus {
+      border-color: #60a5fa;
+    }
+    .gate-btn {
+      width: 100%;
+      padding: 11px 18px;
+      border-radius: 9px;
+      border: none;
+      background: #2563eb;
+      color: #ffffff;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      box-shadow: 0 6px 20px rgba(37, 99, 235, 0.4);
+      transition: background 0.15s;
+    }
+    .gate-btn:hover:not(:disabled) {
+      background: #1d4ed8;
+    }
+    .gate-btn:disabled {
+      opacity: 0.65;
+      cursor: wait;
+    }
+    .gate-status {
+      min-height: 20px;
+      margin-top: 12px;
+      font-size: 12.5px;
+      color: #93c5fd;
+    }
+    .gate-status.error {
+      color: #fca5a5;
+    }
+  </style>
+</head>
+<body>
+  <div class="gate-wrap">
+    <div class="gate-card">
+      <div class="gate-kicker">Protected Walkthrough</div>
+      <h1>Demo House</h1>
+      <p class="gate-sub">Enter access password to launch the 3D walkthrough.</p>
+      <form id="gate-form" class="gate-form">
+        <input
+          id="pw-input"
+          class="gate-input"
+          type="password"
+          placeholder="Access password"
+          autocomplete="current-password"
+          autofocus
+          required
+        />
+        <button id="unlock-btn" class="gate-btn" type="submit">Unlock</button>
+      </form>
+      <div id="gate-status" class="gate-status" role="status" aria-live="polite"></div>
+    </div>
+  </div>
+
+  <script type="module">
+    const form = document.getElementById('gate-form');
+    const pwInput = document.getElementById('pw-input');
+    const unlockBtn = document.getElementById('unlock-btn');
+    const statusEl = document.getElementById('gate-status');
+
+    let cachedAppEnc = null;
+
+    function setStatus(msg, isError = false) {
+      statusEl.textContent = msg;
+      statusEl.classList.toggle('error', isError);
+    }
+
+    if (!window.isSecureContext || !window.crypto?.subtle) {
+      setStatus('HTTPS or localhost is required for Web Crypto decryption.', true);
+      pwInput.disabled = true;
+      unlockBtn.disabled = true;
+    }
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!window.isSecureContext || !window.crypto?.subtle) return;
+
+      const password = pwInput.value;
+      if (!password) return;
+
+      pwInput.disabled = true;
+      unlockBtn.disabled = true;
+      setStatus('Decrypting walkthrough...', false);
+
+      try {
+        if (!cachedAppEnc) {
+          const res = await fetch('./data/app.enc');
+          if (!res.ok) {
+            throw new Error(`Failed to fetch encrypted bundle (HTTP ${res.status})`);
+          }
+          cachedAppEnc = await res.arrayBuffer();
+        }
+
+        const salt = cachedAppEnc.slice(0, 16);
+        const iv = cachedAppEnc.slice(16, 28);
+        const ct = cachedAppEnc.slice(28);
+
+        const baseKey = await crypto.subtle.importKey(
+          'raw',
+          new TextEncoder().encode(password),
+          'PBKDF2',
+          false,
+          ['deriveKey']
+        );
+
+        const aesKey = await crypto.subtle.deriveKey(
+          { name: 'PBKDF2', salt, iterations: 250000, hash: 'SHA-256' },
+          baseKey,
+          { name: 'AES-GCM', length: 256 },
+          false,
+          ['decrypt']
+        );
+
+        let plainBuf;
+        try {
+          plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, aesKey, ct);
+        } catch {
+          setStatus('Incorrect password. Please try again.', true);
+          pwInput.disabled = false;
+          unlockBtn.disabled = false;
+          pwInput.focus();
+          pwInput.select();
+          return;
+        }
+
+        const payload = JSON.parse(new TextDecoder().decode(plainBuf));
+
+        window.__DEMO_DECRYPT = async (encBuf) => {
+          const mIv = new Uint8Array(encBuf, 0, 12);
+          const mData = new Uint8Array(encBuf, 12);
+          return crypto.subtle.decrypt({ name: 'AES-GCM', iv: mIv }, aesKey, mData);
+        };
+
+        const blobUrls = {};
+        const importRe = /from\s+(['"])\.\/([^'"]+\.js)\1/g;
+        for (const modName of payload.moduleOrder) {
+          const src = payload.modules[modName];
+          const rewritten = src.replace(importRe, (full, quote, dep) => {
+            if (!blobUrls[dep]) {
+              throw new Error(`Missing module dependency ${dep} imported by ${modName}`);
+            }
+            return `from ${quote}${blobUrls[dep]}${quote}`;
+          });
+          blobUrls[modName] = URL.createObjectURL(
+            new Blob([rewritten], { type: 'text/javascript' })
+          );
+        }
+
+        const gateStyle = document.getElementById('gate-style');
+        if (gateStyle) gateStyle.remove();
+
+        const appStyle = document.createElement('style');
+        appStyle.textContent = payload.styleCss;
+        document.head.appendChild(appStyle);
+
+        document.title = 'Demo House — 3D Walkthrough';
+        document.body.innerHTML = payload.bodyHtml;
+
+        await import(blobUrls['main.js']);
+      } catch (err) {
+        console.error(err);
+        setStatus(err?.message || 'Unable to unlock walkthrough.', true);
+        pwInput.disabled = false;
+        unlockBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
